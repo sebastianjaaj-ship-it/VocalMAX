@@ -1,0 +1,49 @@
+name: Build Windows VST3
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure (CMake + JUCE)
+        run: cmake -S . -B build -A x64
+
+      - name: Build Release
+        run: cmake --build build --config Release --parallel
+
+      - name: Package VST3
+        shell: pwsh
+        run: |
+          $vst = Get-ChildItem -Path build -Recurse -Directory -Filter "VocalMAX.vst3" | Where-Object { $_.FullName -match "Release" } | Select-Object -First 1
+          if (-not $vst) { throw "VST3 bundle not found" }
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Copy-Item -Recurse $vst.FullName "dist/VocalMAX.vst3"
+          Copy-Item README.md dist/
+          Compress-Archive -Path "dist/*" -DestinationPath "VocalMAX-Windows-VST3.zip" -Force
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: VocalMAX-Windows-VST3
+          path: dist/
+
+      - name: Publish release (latest build)
+        if: github.event_name != 'pull_request'
+        continue-on-error: true
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'latest' }}
+          name: VocalMAX (Windows VST3)
+          prerelease: ${{ !startsWith(github.ref, 'refs/tags/') }}
+          files: VocalMAX-Windows-VST3.zip
